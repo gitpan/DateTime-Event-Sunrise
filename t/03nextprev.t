@@ -1,5 +1,5 @@
 #
-#     Test script for DateTime::Event::Sunrise
+#     Test script for DateTime::Event::Sunrise (see RT ticket 36532)
 #     Copyright (C) 2013 Ron Hill and Jean Forget
 #
 #     This program is distributed under the same terms as Perl 5.16.3:
@@ -32,27 +32,33 @@ use DateTime;
 use DateTime::Event::Sunrise;
 
 my @tests = split "\n", <<'TEST';
-2.33  48.83 1 20 18:04:42
-2.33  48.83 1 21 18:06:12
-2.33  48.83 1 22 18:07:43
-92.33 48.83 0 20 12:03:10
-92.33 48.83 0 21 12:04:41
-92.33 48.83 0 22 12:06:11
+1212537601 46.74575  -65.2488
+1212536601 64.74575 -220.2488
 TEST
 
-plan (tests => scalar @tests);
+plan (tests => 4 * scalar @tests);
 
 foreach (@tests) {
-  my ($lon, $lat, $precise, $dd, $res) = split ' ', $_;
-  my $sunset = DateTime::Event::Sunrise->sunset(longitude  => $lon,
-                                                 latitude  => $lat,
-                                                 precise   => $precise,
-                                                 upper_limb => 0,
-                                                );
-  my  $day =  DateTime->new(year => 2008, month => 3, day => $dd, time_zone => 'UTC');
+  my ($epoch, $lat, $lon) = split ' ', $_;
+  my $sunrise = DateTime::Event::Sunrise->sunrise(longitude => $lon,
+                                                  latitude  => $lat,
+                                                  precise   => 1,
+                                                  );
+  my $sunset  = DateTime::Event::Sunrise->sunset (longitude => $lon,
+                                                  latitude  => $lat,
+                                                  precise   => 1,
+                                                  );
+  my $dt = DateTime->from_epoch(epoch => $epoch);
 
-  is ($sunset->next($day)->strftime("%H:%M:%S"), $res);
+  my $next_sunrise = $sunrise->next($dt);
+  my $next_sunset  = $sunset ->next($dt);
+  my $prev_sunrise = $sunrise->previous($dt);
+  my $prev_sunset  = $sunset ->previous($dt);
 
+  ok($next_sunrise->epoch() > $epoch, "Next sunrise ($next_sunrise) should be after dt ($dt)");
+  ok($next_sunset ->epoch() > $epoch, "Next sunset  ($next_sunset) should be after dt ($dt)");
+  ok($prev_sunrise->epoch() < $epoch, "Prev sunrise ($prev_sunrise) should be before dt ($dt)");
+  ok($prev_sunset ->epoch() < $epoch, "Prev sunset  ($prev_sunset) should be before dt ($dt)");
 }
 
 
