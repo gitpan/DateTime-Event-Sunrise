@@ -26,6 +26,7 @@
             "DateTime::Duration" : "0",
             "DateTime::Span" : "0",
             "DateTime::SpanSet" : "0",
+            "Test::Exception" : "0",
             "Test::More" : "0"
          }
       },
@@ -47,5 +48,5 @@
       }
    },
    "release_status" : "stable",
-   "version" : "0.0503"
+   "version" : "0.0504"
 }

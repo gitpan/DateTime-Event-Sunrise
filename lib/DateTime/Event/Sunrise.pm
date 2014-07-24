@@ -19,7 +19,7 @@ use Params::Validate qw(:all);
 use Set::Infinite qw(inf $inf);
 use vars qw( $VERSION $RADEG $DEGRAD @ISA );
 @ISA     = qw( Exporter );
-$VERSION = '0.0503';
+$VERSION = '0.0504';
 $RADEG   = ( 180 / pi );
 $DEGRAD  = ( pi / 180 );
 my $INV360 = ( 1.0 / 360.0 );
@@ -51,6 +51,7 @@ sub new {
           iteration  => { type => SCALAR, default => '0' },
           precise    => { type => SCALAR, default => '0' },
           upper_limb => { type => SCALAR, default => '0' },
+          silent     => { type => SCALAR, default => '0' },
       }
     );
 
@@ -226,6 +227,96 @@ sub sunrise_sunset_span {
     );
 }
 
+#
+# FUNCTIONAL SEQUENCE for is_polar_night
+#
+# _GIVEN
+# 
+# A sunrise object
+# A DateTime object
+# 
+# _THEN
+#
+#  Validate the DateTime object is valid  
+#  Compute sunrise and sunset
+#
+# _RETURN
+#
+#  A boolean flag telling whether the sun will stay under the horizon or not
+#
+sub is_polar_night {
+
+    my $self  = shift;
+    my $dt    = shift;
+    my $class = ref($dt);
+
+    if ( ! $dt->isa('DateTime') ) {
+        croak("Dates need to be DateTime objects");
+    }
+    my ( undef, undef, $rise_season, $set_season ) = _sunrise( $self, $dt, 1 );
+    return ($rise_season < 0 || $set_season < 0);
+}
+
+#
+# FUNCTIONAL SEQUENCE for is_polar_day
+#
+# _GIVEN
+# 
+# A sunrise object
+# A DateTime object
+# 
+# _THEN
+#
+#  Validate the DateTime object is valid  
+#  Compute sunrise and sunset
+#
+# _RETURN
+#
+#  A boolean flag telling whether the sun will stay above the horizon or not
+#
+sub is_polar_day {
+
+    my $self  = shift;
+    my $dt    = shift;
+    my $class = ref($dt);
+
+    if ( ! $dt->isa('DateTime') ) {
+        croak("Dates need to be DateTime objects");
+    }
+    my ( undef, undef, $rise_season, $set_season ) = _sunrise( $self, $dt, 1 );
+    return ($rise_season > 0 || $set_season > 0);
+}
+
+#
+# FUNCTIONAL SEQUENCE for is_day_and_night
+#
+# _GIVEN
+# 
+# A sunrise object
+# A DateTime object
+# 
+# _THEN
+#
+#  Validate the DateTime object is valid  
+#  Compute sunrise and sunset
+#
+# _RETURN
+#
+#  A boolean flag telling whether the sun will rise and set or not
+#
+sub is_day_and_night {
+
+    my $self  = shift;
+    my $dt    = shift;
+    my $class = ref($dt);
+
+    if ( ! $dt->isa('DateTime') ) {
+        croak("Dates need to be DateTime objects");
+    }
+    my ( undef, undef, $rise_season, $set_season ) = _sunrise( $self, $dt, 1 );
+    return ($rise_season == 0 && $set_season == 0);
+}
+
     #
     #
     # FUNCTIONAL SEQUENCE for _following_sunrise 
@@ -398,14 +489,17 @@ sub _previous_sunset {
     # _RETURN
     # 
     # two DateTime objects with the date and time for sunrise and sunset
+    # two season flags for sunrise and sunset respectively
     #
 sub _sunrise {
 
-    my $self      = shift;
-    my $dt        = shift;
+    my ($self, $dt, $silent) = @_;
     my $cloned_dt = $dt->clone;
     my $altit     = $self->{altitude};
     my $precise   = defined( $self->{precise} ) ? $self->{precise} : 0;
+    unless (defined $silent) {
+      $silent    = defined( $self->{silent}  ) ? $self->{silent}  : 0;
+    }
     $cloned_dt->set_time_zone('floating');
 
     if ($precise) {
@@ -413,8 +507,9 @@ sub _sunrise {
         # This is the initial start
 
         my $d = days_since_2000_Jan_0($cloned_dt) + 0.5 - $self->{longitude} / 360.0;
-        my ($tmp_rise_1, $tmp_set_1) = _sunrise_sunset( $d, $self->{longitude}, $self->{latitude}, $altit,
-                                                        15.04107, $self->{upper_limb});
+        my ($tmp_rise_1, $tmp_set_1, $rise_season) = _sunrise_sunset( $d, $self->{longitude}, $self->{latitude}, $altit,
+                                                                     15.04107, $self->{upper_limb}, $silent);
+        my $set_season = $rise_season;
 
         # Now we have the initial rise/set times next recompute d using the exact moment
         # recompute sunrise
@@ -424,12 +519,12 @@ sub _sunrise {
         until ( equal( $tmp_rise_2, $tmp_rise_3, 8 ) ) {
 
             my $d_sunrise_1 = $d + $tmp_rise_1 / 24.0;
-            ($tmp_rise_2, undef) = _sunrise_sunset($d_sunrise_1, $self->{longitude}, $self->{latitude},
-                                                     $altit, 15.04107, $self->{upper_limb});
+            ($tmp_rise_2, undef, undef) = _sunrise_sunset($d_sunrise_1, $self->{longitude}, $self->{latitude},
+                                                          $altit, 15.04107, $self->{upper_limb}, $silent);
             $tmp_rise_1 = $tmp_rise_3;
             my $d_sunrise_2 = $d + $tmp_rise_2 / 24.0;
-            ($tmp_rise_3, undef) = _sunrise_sunset($d_sunrise_2, $self->{longitude}, $self->{latitude},
-                                                     $altit, 15.04107, $self->{upper_limb});
+            ($tmp_rise_3, undef, $rise_season) = _sunrise_sunset($d_sunrise_2, $self->{longitude}, $self->{latitude},
+                                                                 $altit, 15.04107, $self->{upper_limb}, $silent);
         }
 
         my $tmp_set_2 = 9;
@@ -438,12 +533,12 @@ sub _sunrise {
         until ( equal( $tmp_set_2, $tmp_set_3, 8 ) ) {
 
             my $d_sunset_1 = $d + $tmp_set_1 / 24.0;
-            (undef, $tmp_set_2) = _sunrise_sunset( $d_sunset_1, $self->{longitude}, $self->{latitude},
-                                                     $altit, 15.04107, $self->{upper_limb});
+            (undef, $tmp_set_2, undef) = _sunrise_sunset( $d_sunset_1, $self->{longitude}, $self->{latitude},
+                                                          $altit, 15.04107, $self->{upper_limb}, $silent);
             $tmp_set_1 = $tmp_set_3;
             my $d_sunset_2 = $d + $tmp_set_2 / 24.0;
-            (undef, $tmp_set_3) = _sunrise_sunset( $d_sunset_2, $self->{longitude}, $self->{latitude},
-                                                     $altit, 15.04107, $self->{upper_limb});
+            (undef, $tmp_set_3, $set_season) = _sunrise_sunset( $d_sunset_2, $self->{longitude}, $self->{latitude},
+                                                                $altit, 15.04107, $self->{upper_limb}, $silent);
 
         }
 
@@ -468,11 +563,11 @@ sub _sunrise {
         my $tz        = $dt->time_zone;
         $rise_time->set_time_zone($tz) unless $tz->is_floating;
         $set_time->set_time_zone($tz) unless $tz->is_floating;
-        return ( $rise_time, $set_time );
+        return ( $rise_time, $set_time, $rise_season, $set_season );
     }
     else {
         my $d = days_since_2000_Jan_0($cloned_dt) + 0.5 - $self->{longitude} / 360.0;
-        my ( $h1, $h2 ) = _sunrise_sunset( $d, $self->{longitude}, $self->{latitude}, $altit, 15.0, $self->{upper_limb});
+        my ( $h1, $h2, $season ) = _sunrise_sunset( $d, $self->{longitude}, $self->{latitude}, $altit, 15.0, $self->{upper_limb}, $silent);
         my ( $seconds_rise, $seconds_set ) = convert_hour( $h1, $h2 );
         my $rise_dur = DateTime::Duration->new( seconds => $seconds_rise );
         my $set_dur  = DateTime::Duration->new( seconds => $seconds_set );
@@ -490,7 +585,7 @@ sub _sunrise {
         my $tz        = $dt->time_zone;
         $rise_time->set_time_zone($tz) unless $tz->is_floating;
         $set_time->set_time_zone($tz) unless $tz->is_floating;
-        return ( $rise_time, $set_time );
+        return ( $rise_time, $set_time, $season, $season );
     }
 
 }
@@ -501,7 +596,7 @@ sub _sunrise {
     #
     # _GIVEN
     # 
-    #  days since Jan 0 2000, longitude, latitude, reference sun height $h and the "upper limb" flag
+    #  days since Jan 0 2000, longitude, latitude, reference sun height $h and the "upper limb" and "silent" flags
     # _THEN
     #
     #  Compute the sunrise/sunset times for that day   
@@ -509,10 +604,11 @@ sub _sunrise {
     # _RETURN
     #
     #  sunrise and sunset times as hours (GMT Time) 
+    #  season flag: -1 for polar night, +1 for midnight sun, 0 for day and night
     #
 sub _sunrise_sunset {
 
-    my ( $d, $lon, $lat, $altit, $h, $upper_limb ) = @_;
+    my ( $d, $lon, $lat, $altit, $h, $upper_limb, $silent ) = @_;
 
     # Compute local sidereal time of this moment
     my $sidtime = revolution(GMST0($d) + 180.0 + $lon);
@@ -538,13 +634,20 @@ sub _sunrise_sunset {
                / (cosd($lat) * cosd($sdec));
 
     my $t;
+    my $season = 0;
     if ( $cost >= 1.0 ) {
-        carp "Sun never rises!!\n";
+        unless ($silent) {
+          carp "Sun never rises!!\n";
+        }
         $t = 0.0;    # Sun always below altit
+        $season = -1;
     }
     elsif ( $cost <= -1.0 ) {
-        carp "Sun never sets!!\n";
+        unless ($silent) {
+          carp "Sun never sets!!\n";
+        }
         $t = 12.0;    # Sun always above altit
+        $season = +1;
     }
     else {
         $t = acosd($cost) / 15.0;    # The diurnal arc, hours
@@ -554,7 +657,7 @@ sub _sunrise_sunset {
 
     my $hour_rise_ut = $tsouth - $t;
     my $hour_set_ut  = $tsouth + $t;
-    return ( $hour_rise_ut, $hour_set_ut );
+    return ( $hour_rise_ut, $hour_set_ut, $season );
 
 }
 
@@ -876,6 +979,28 @@ DateTime::Event::Sunrise - Perl DateTime extension for computing the sunrise/sun
     say $dt_yapc_na_rise, ' ', $dt_yapc_na_set;
   }
 
+  # If you deal with a polar location
+  my $sun_in_Halley = DateTime::Event::Sunrise->new(
+                                 longitude => -26.65, # 26°39'W
+                                 latitude  => -75.58, # 75°35'S
+                                 precise   => 1,
+                                 );
+  my $Alex_arrival = DateTime->new(year  => 2006, # approximate date, not necessarily the exact one
+                                   month =>    1,
+                                   day   =>   15,
+                                   time_zone => 'Antarctica/Rothera');
+  say $Alex_arrival->strftime("Alex Gough (a Perl programmer) arrived at Halley Base on %Y-%m-%d.");
+  if ($sun_in_Halley->is_polar_day($Alex_arrival)) {
+    say "It would be days, maybe weeks, before the sun would set.";
+  }
+  elsif ($sun_in_Halley->is_polar_night($Alex_arrival)) {
+    say "It would be days, maybe weeks, before the sun would rise.";
+  }
+  else {
+    my $sunset = $sun_in_Halley->sunset_datetime($Alex_arrival);
+    say $sunset->strftime("And he saw his first antarctic sunset at %H:%M:%S.");
+  }
+
 =head1 DESCRIPTION
 
 This module will computes the time of sunrise and sunset for a given date
@@ -945,6 +1070,17 @@ When the altitude takes into account the sun radius, this parameter should be fa
 Default value is 0, since the upper limb correction is already
 taken in account with the default -0.833 altitude.
 
+=item silent
+
+Boolean to control the output of some warning messages.
+With polar locations and dates near the winter solstice or the summer solstice,
+it may happen that the sun never rises above the horizon or never sets below.
+If this parameter is set to false, the module will send warnings for these
+conditions. If this parameter is set to true, the module will not pollute
+your F<STDERR> stream.
+
+Default value is 0, for backward compatibility.
+
 =back
 
 =head2 sunrise, sunset
@@ -965,6 +1101,26 @@ for the same day, but with the time of the sunrise or sunset, respectively.
 This method applies to C<DateTime::Event::Sunrise> objects. It accepts a 
 C<DateTime> object as the second parameter. It returns a C<DateTime::Span>
 object, beginning at sunrise and ending at sunset.
+
+=head2 is_polar_night, is_polar_day, is_day_and_night
+
+These methods apply to C<DateTime::Event::Sunrise> objects. They accept a 
+C<DateTime> object as the second parameter. They return a boolean indicating
+the following condutions:
+
+=over 4
+
+=item * is_polar_night is true when the sun stays under the horizon. Or rather
+under the altitude parameter used when the C<DateTime::Event::Sunrise> object was created.
+
+=item * is_polar_day is true when the sun stays above the horizon,
+resulting in a "Midnight sun". Or rather when it stays above the
+altitude parameter used when the C<DateTime::Event::Sunrise> object was created.
+
+=item * is_day_and_night is true when neither is_polar_day, nor is_polar_night
+are true.
+
+=back
 
 =head2 next current previous contains as_list iterator
 
@@ -1161,6 +1317,11 @@ POSIX
 Math::Trig
 
 =back
+
+=head1 BUGS AND CAVEATS
+
+Using a latitude of 90 degrees (North Pole or South Pole) gives curious results.
+I guess that it is linked with a ambiguous value resulting from a 0/0 computation.
 
 =head1 AUTHORS
 
